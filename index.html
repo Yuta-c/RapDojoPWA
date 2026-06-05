@@ -375,13 +375,11 @@
     <button class="primary-btn rap-btn" id="rap-submit-btn" disabled>送信</button>
   </div>
 
-  <!-- RATING -->
-  <div class="sub-panel" id="rap-rating" style="gap:14px">
-    <div style="font-size:1.2rem;font-weight:900">バトル終了！自己採点</div>
-    <div id="rap-turn-preview"></div>
-    <div class="rating-axes" id="rap-rating-axes"></div>
-    <button class="primary-btn rap-btn" id="rap-rating-submit" disabled>採点を保存</button>
-    <button class="link-btn" id="rap-rating-skip">スキップ</button>
+  <!-- JUDGING -->
+  <div class="sub-panel" id="rap-judging" style="gap:18px;justify-content:center;flex:1">
+    <div style="font-size:3rem">⚖️</div>
+    <div class="gen-spinner"></div>
+    <div style="font-size:.9rem;color:var(--muted)">Geminiが判定中…</div>
   </div>
 
   <!-- RESULT -->
@@ -391,9 +389,9 @@
       <div class="result-score" id="result-rap-score">—</div>
       <div class="result-meta">
         <span id="result-rap-theme">—</span>
-        <span id="result-rap-time">—</span>
       </div>
     </div>
+    <div class="card-box" id="result-rap-comment" style="display:none;border-color:rgba(236,72,153,.3);color:#f9a8d4;font-size:.9rem;line-height:1.7"></div>
     <div class="section-label">ターン詳細</div>
     <div id="rap-turn-cards" style="display:flex;flex-direction:column;gap:12px;width:100%"></div>
     <button class="primary-btn rap-btn" id="rap-next-btn">🔁 次のバトル</button>

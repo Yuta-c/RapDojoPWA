@@ -129,10 +129,12 @@ const DIFFICULTIES = {
   extreme:      { label: '超級', time: 30,  icon: '🔥', color: '#ef4444' },
 };
 
+const N8N_BASE = 'https://n8n.tomoooooooo.net/webhook';
+
 class RapBattleEngine extends EventTarget {
   constructor() {
     super();
-    this.phase = 'intro'; // intro|generating|speaking|playing|rating|result
+    this.phase = 'intro'; // intro|generating|speaking|playing|judging|result
     this.difficulty = DIFFICULTIES.advanced;
     this.theme = '';
     this.currentTurnNumber = 1;
@@ -140,7 +142,7 @@ class RapBattleEngine extends EventTarget {
     this.currentUserResponse = '';
     this.timeRemaining = 60;
     this.completedTurns = [];
-    this.rating = { rhyme: 0, punchline: 0, story: 0, originality: 0 };
+    this.geminiResult = null; // Geminiの採点結果
     this.isSpeakingDis = false;
     this._timerInterval = null;
     this._timeUsedStart = 0;
@@ -166,7 +168,7 @@ class RapBattleEngine extends EventTarget {
   startGame() {
     this.completedTurns = [];
     this.currentTurnNumber = 1;
-    this.rating = { rhyme: 0, punchline: 0, story: 0, originality: 0 };
+    this.geminiResult = null;
     this.theme = randomTheme();
     playRaveHorn(0.04);
     this._generateDis();
@@ -184,16 +186,6 @@ class RapBattleEngine extends EventTarget {
     this._finishTurn(this.difficulty.time - this.timeRemaining);
   }
 
-  submitRating() {
-    this.phase = 'result';
-    this.emit('update');
-  }
-
-  skipRating() {
-    this.phase = 'result';
-    this.emit('update');
-  }
-
   restart() {
     this._clearTimer();
     TTS.stop();
@@ -205,37 +197,35 @@ class RapBattleEngine extends EventTarget {
   get canSubmit() { return this.currentUserResponse.trim().length > 0; }
   get isLastTurn() { return this.currentTurnNumber >= TOTAL_TURNS; }
   get timerProgress() { return this.timeRemaining / this.difficulty.time; }
-  get ratingComplete() {
-    const r = this.rating;
-    return r.rhyme > 0 && r.punchline > 0 && r.story > 0 && r.originality > 0;
-  }
-  get abilityScore() {
-    if (!this.ratingComplete) return 0;
-    const r = this.rating;
-    return ((r.rhyme + r.punchline + r.story + r.originality) / 4) * 20;
-  }
 
   // ─── Internal ────────────────────────────────────────────────
 
-  _generateDis() {
+  async _generateDis() {
     this.phase = 'generating';
     this.currentUserResponse = '';
     this.emit('update');
-    // simulate brief async (could be real API call here)
+    try {
+      const res = await fetch(`${N8N_BASE}/rap-generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: this.theme }),
+      });
+      const data = await res.json();
+      this.currentDisRap = (data.dis || '').trim() || localDis(this.theme);
+    } catch {
+      this.currentDisRap = localDis(this.theme); // フォールバック
+    }
+    this.phase = 'speaking';
+    this.isSpeakingDis = true;
+    this.emit('update');
+    playRaveHorn();
     setTimeout(() => {
-      this.currentDisRap = localDis(this.theme);
-      this.phase = 'speaking';
-      this.isSpeakingDis = true;
-      this.emit('update');
-      playRaveHorn();
-      setTimeout(() => {
-        TTS.speak(this.currentDisRap, 0.52, 0.85, () => {
-          this.isSpeakingDis = false;
-          this.emit('update');
-          this._startInputPhase();
-        });
-      }, 1000);
-    }, 600);
+      TTS.speak(this.currentDisRap, 0.52, 0.85, () => {
+        this.isSpeakingDis = false;
+        this.emit('update');
+        this._startInputPhase();
+      });
+    }, 1000);
   }
 
   _startInputPhase() {
@@ -275,11 +265,34 @@ class RapBattleEngine extends EventTarget {
       timeUsed,
     });
     if (this.isLastTurn) {
-      this.phase = 'rating';
+      this.phase = 'judging';
       this.emit('update');
+      this._judgeByGemini().then(result => {
+        this.geminiResult = result;
+        this.phase = 'result';
+        this.emit('update');
+      });
     } else {
       this.currentTurnNumber++;
       this._generateDis();
+    }
+  }
+
+  async _judgeByGemini() {
+    try {
+      const aiDis = this.completedTurns.map((t, i) => `【T${i+1}】${t.disRap}`).join('\n');
+      const userResponse = this.completedTurns.map((t, i) => `【T${i+1}】${t.userResponse || '（無回答）'}`).join('\n');
+      const res = await fetch(`${N8N_BASE}/rap-judge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: this.theme, aiDis, userResponse }),
+      });
+      const data = await res.json();
+      const raw = data.result || '';
+      const match = raw.match(/\{[\s\S]*\}/);
+      return match ? JSON.parse(match[0]) : null;
+    } catch {
+      return null;
     }
   }
 }

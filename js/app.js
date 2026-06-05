@@ -40,7 +40,7 @@ function renderRap() {
   const ph = e.phase;
 
   // sub-screen visibility
-  ['rap-intro','rap-generating','rap-speaking','rap-playing','rap-rating','rap-result']
+  ['rap-intro','rap-generating','rap-speaking','rap-playing','rap-judging','rap-result']
     .forEach(id => document.getElementById(id).classList.remove('visible'));
   document.getElementById('rap-' + ph)?.classList.add('visible');
 
@@ -48,7 +48,6 @@ function renderRap() {
   else if (ph === 'generating') renderRapGenerating();
   else if (ph === 'speaking') renderRapSpeaking();
   else if (ph === 'playing') renderRapPlaying();
-  else if (ph === 'rating') renderRapRating();
   else if (ph === 'result') renderRapResult();
 }
 
@@ -136,41 +135,30 @@ function timerColor(e) {
   return '#ef4444';
 }
 
-// — Rating —
-function renderRapRating() {
-  // Turn previews
-  const previewEl = document.getElementById('rap-turn-preview');
-  previewEl.innerHTML = '';
-  for (let i = 1; i <= TOTAL_TURNS; i++) {
-    const turn = rapEngine.completedTurns.find(t => t.turnNumber === i);
-    const div = document.createElement('div');
-    div.className = 'turn-preview';
-    div.innerHTML = `<span class="turn-badge">T${i}</span><span class="turn-excerpt">${
-      turn?.userResponse?.trim() ? turn.userResponse.split('\n')[0].slice(0, 30) + '…' : '（タイムアップ）'
-    }</span>`;
-    previewEl.appendChild(div);
-  }
-  // Star ratings
-  renderStars('rap-rating', rapEngine.rating, (axis, val) => {
-    rapEngine.rating[axis] = val;
-    renderRap();
-  });
-  document.getElementById('rap-rating-submit').disabled = !rapEngine.ratingComplete;
-}
-
-document.getElementById('rap-rating-submit').addEventListener('click', () => rapEngine.submitRating());
-document.getElementById('rap-rating-skip').addEventListener('click', () => rapEngine.skipRating());
-
 // — Result —
 function renderRapResult() {
   const e = rapEngine;
-  const score = Math.round(e.abilityScore);
-  const grade = gradeFromScore(score);
-  document.getElementById('result-rap-grade').textContent = grade;
-  document.getElementById('result-rap-score').textContent = score + '点';
+  const r = e.geminiResult;
+
+  if (r) {
+    // Gemini判定あり
+    const score = Math.round(((r.rhyme + r.punchline + r.flow + r.originality) / 4) * 20);
+    const grade = r.winner === 'USER' ? 'WIN' : 'LOSE';
+    document.getElementById('result-rap-grade').textContent = grade;
+    document.getElementById('result-rap-grade').style.color = r.winner === 'USER' ? 'var(--green)' : 'var(--red)';
+    document.getElementById('result-rap-score').textContent =
+      `韻${r.rhyme} パンチ${r.punchline} フロー${r.flow} 独自性${r.originality}`;
+    const commentEl = document.getElementById('result-rap-comment');
+    commentEl.textContent = '⚖️ ' + r.comment;
+    commentEl.style.display = 'block';
+  } else {
+    // Gemini失敗時フォールバック
+    document.getElementById('result-rap-grade').textContent = '—';
+    document.getElementById('result-rap-score').textContent = '判定失敗';
+    document.getElementById('result-rap-comment').style.display = 'none';
+  }
+
   document.getElementById('result-rap-theme').textContent = e.theme;
-  document.getElementById('result-rap-time').textContent =
-    e.completedTurns.reduce((s, t) => s + t.timeUsed, 0).toFixed(1) + '秒';
 
   // Turn cards
   const cardsEl = document.getElementById('rap-turn-cards');
