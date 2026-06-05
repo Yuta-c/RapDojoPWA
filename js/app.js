@@ -40,7 +40,7 @@ function renderRap() {
   const ph = e.phase;
 
   // sub-screen visibility
-  ['rap-intro','rap-generating','rap-speaking','rap-playing','rap-judging','rap-result']
+  ['rap-intro','rap-generating','rap-speaking','rap-playing','rap-judging','rap-result','rap-error']
     .forEach(id => document.getElementById(id).classList.remove('visible'));
   document.getElementById('rap-' + ph)?.classList.add('visible');
 
@@ -48,7 +48,9 @@ function renderRap() {
   else if (ph === 'generating') renderRapGenerating();
   else if (ph === 'speaking') renderRapSpeaking();
   else if (ph === 'playing') renderRapPlaying();
+  else if (ph === 'judging') renderRapJudging();
   else if (ph === 'result') renderRapResult();
+  else if (ph === 'error') renderRapError();
 }
 
 // — Intro —
@@ -75,6 +77,20 @@ document.getElementById('rap-start-btn').addEventListener('click', () => {
 function renderRapGenerating() {
   document.getElementById('gen-theme').textContent = '「' + rapEngine.theme + '」';
   document.getElementById('gen-turn').textContent = rapEngine.currentTurnNumber + ' / ' + TOTAL_TURNS;
+  document.getElementById('gen-msg').textContent = rapEngine.loadingMsg || 'AIのDisを準備中…';
+  document.getElementById('gen-elapsed').textContent = rapEngine.loadingElapsed > 0 ? rapEngine.loadingElapsed + '秒経過' : '';
+}
+
+// — Judging —
+function renderRapJudging() {
+  document.getElementById('judge-msg').textContent = rapEngine.loadingMsg || 'Geminiが判定中…';
+  document.getElementById('judge-elapsed').textContent = rapEngine.loadingElapsed > 0 ? rapEngine.loadingElapsed + '秒経過' : '';
+}
+
+// — Error —
+function renderRapError() {
+  document.getElementById('rap-error-msg').textContent = rapEngine.errorMsg || '接続エラー';
+  document.getElementById('rap-error-detail').textContent = rapEngine.errorDetail || '—';
 }
 
 // — Speaking —
@@ -186,6 +202,14 @@ document.getElementById('rap-next-btn').addEventListener('click', () => {
   rapEngine.startGame();
 });
 document.getElementById('rap-home-btn').addEventListener('click', () => showScreen('screen-home'));
+
+document.getElementById('rap-error-retry').addEventListener('click', () => {
+  TTS.unlock();
+  if (_selectedBeatId !== null) {
+    BeatManager.play(_selectedBeatId).then(() => updateMiniPlayer('rap')).catch(() => {});
+  }
+  rapEngine.startGame();
+});
 
 // ─── Rhyme Practice UI ─────────────────────────────────────────
 
@@ -499,7 +523,7 @@ rapEngine.addEventListener('update', () => {
   const ph = rapEngine.phase;
   if ((ph === 'playing' || ph === 'generating' || ph === 'speaking') && _selectedBeatId !== null) {
     updateMiniPlayer('rap');
-  } else if (ph === 'rating' || ph === 'result' || ph === 'intro') {
+  } else if (ph === 'rating' || ph === 'result' || ph === 'intro' || ph === 'error') {
     if (BeatManager.currentId !== null) {
       BeatManager.stop();
       updateMiniPlayer('rap');

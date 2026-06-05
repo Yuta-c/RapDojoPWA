@@ -130,11 +130,33 @@ const DIFFICULTIES = {
 };
 
 const N8N_BASE = 'https://n8n.tomoooooooo.net/webhook';
+const FETCH_TIMEOUT_MS = 120000;
+
+const GEN_MSGS = [
+  'AIが韻を練っています…',
+  'Disのネタを仕込み中…',
+  '魂を込めて言葉を紡ぐ…',
+  '次の一手を考え中…',
+  '最高のパンチラインを探して…',
+  '言葉の刃を研いでいます…',
+  '相手の弱点を分析中…',
+  'ライムの海を泳いでいます…',
+];
+
+const JUDGE_MSGS = [
+  'Geminiが採点中…',
+  '韻の精度を分析中…',
+  'パンチラインを評価中…',
+  'フローを採点中…',
+  '独自性を検証中…',
+  '勝敗を判定中…',
+  '最終スコアを計算中…',
+];
 
 class RapBattleEngine extends EventTarget {
   constructor() {
     super();
-    this.phase = 'intro'; // intro|generating|speaking|playing|judging|result
+    this.phase = 'intro'; // intro|generating|speaking|playing|judging|result|error
     this.difficulty = DIFFICULTIES.advanced;
     this.theme = '';
     this.currentTurnNumber = 1;
@@ -142,10 +164,15 @@ class RapBattleEngine extends EventTarget {
     this.currentUserResponse = '';
     this.timeRemaining = 60;
     this.completedTurns = [];
-    this.geminiResult = null; // Geminiの採点結果
+    this.geminiResult = null;
+    this.errorMsg = '';
+    this.errorDetail = '';
     this.isSpeakingDis = false;
     this._timerInterval = null;
     this._timeUsedStart = 0;
+    this.loadingMsg = '';
+    this.loadingElapsed = 0;
+    this._loadingInterval = null;
     this._speechInput = new SpeechInput();
 
     this._speechInput.addEventListener('result', e => {
@@ -200,21 +227,67 @@ class RapBattleEngine extends EventTarget {
 
   // ─── Internal ────────────────────────────────────────────────
 
+  _startLoading(msgs) {
+    this._stopLoading();
+    this.loadingMsg = msgs[0];
+    this.loadingElapsed = 0;
+    const start = Date.now();
+    let idx = 0;
+    this._loadingInterval = setInterval(() => {
+      this.loadingElapsed = Math.floor((Date.now() - start) / 1000);
+      idx = (idx + 1) % msgs.length;
+      this.loadingMsg = msgs[idx];
+      this.emit('update');
+    }, 4000);
+  }
+
+  _stopLoading() {
+    clearInterval(this._loadingInterval);
+    this._loadingInterval = null;
+  }
+
+  async _fetchWithTimeout(url, options = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...options, signal: ctrl.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  }
+
   async _generateDis() {
     this.phase = 'generating';
     this.currentUserResponse = '';
+    this._startLoading(GEN_MSGS);
     this.emit('update');
     try {
-      const res = await fetch(`${N8N_BASE}/rap-generate`, {
+      const res = await this._fetchWithTimeout(`${N8N_BASE}/rap-generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ theme: this.theme }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      this.currentDisRap = (data.dis || '').trim() || localDis(this.theme);
-    } catch {
-      this.currentDisRap = localDis(this.theme); // フォールバック
+      const dis = (data.dis || '').trim();
+      if (!dis || dis.startsWith('エラー') || dis.startsWith('Error:')) {
+        throw new Error(dis || 'レスポンスが空です');
+      }
+      this.currentDisRap = dis;
+    } catch (e) {
+      this._stopLoading();
+      this.phase = 'error';
+      this.errorMsg = 'AI生成エラー';
+      this.errorDetail = e.name === 'AbortError'
+        ? 'タイムアウト（120秒）。AIの応答が遅すぎました。'
+        : (e.message || '不明なエラー');
+      this.emit('update');
+      return;
     }
+    this._stopLoading();
     this.phase = 'speaking';
     this.isSpeakingDis = true;
     this.emit('update');
@@ -279,19 +352,27 @@ class RapBattleEngine extends EventTarget {
   }
 
   async _judgeByGemini() {
+    this._startLoading(JUDGE_MSGS);
+    this.emit('update');
     try {
       const aiDis = this.completedTurns.map((t, i) => `【T${i+1}】${t.disRap}`).join('\n');
       const userResponse = this.completedTurns.map((t, i) => `【T${i+1}】${t.userResponse || '（無回答）'}`).join('\n');
-      const res = await fetch(`${N8N_BASE}/rap-judge`, {
+      const res = await this._fetchWithTimeout(`${N8N_BASE}/rap-judge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ theme: this.theme, aiDis, userResponse }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const raw = data.result || '';
+      const raw = (data.result || '').trim();
+      if (!raw || raw.startsWith('エラー') || raw.startsWith('Error:')) {
+        throw new Error(raw || 'レスポンスが空です');
+      }
       const match = raw.match(/\{[\s\S]*\}/);
+      this._stopLoading();
       return match ? JSON.parse(match[0]) : null;
     } catch {
+      this._stopLoading();
       return null;
     }
   }
